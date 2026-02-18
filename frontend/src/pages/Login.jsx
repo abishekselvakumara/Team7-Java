@@ -1,11 +1,12 @@
-import React, { useState, useEffect, useRef } from "react";
-import { useNavigate, Link } from "react-router-dom";
+import React, { useState, useEffect } from "react";
+import { useNavigate, Link, useLocation } from "react-router-dom";
 import { loginUser } from "../services/authService";
 import { motion } from "framer-motion";
 
 function Login() {
   const navigate = useNavigate();
-  const formRef = useRef(null);
+  const location = useLocation();
+  const from = location.state?.from?.pathname || "/";
 
   const [form, setForm] = useState({
     email: "",
@@ -18,17 +19,11 @@ function Login() {
   const [remainingAttempts, setRemainingAttempts] = useState(null);
   const [lockTimeRemaining, setLockTimeRemaining] = useState(null);
   const [countdown, setCountdown] = useState(null);
-  const [lockUntil, setLockUntil] = useState(null);
 
   // Load saved state from sessionStorage on component mount
   useEffect(() => {
     const savedLockUntil = sessionStorage.getItem('lockUntil');
     const savedEmail = sessionStorage.getItem('lockedEmail');
-    const savedFormEmail = sessionStorage.getItem('formEmail');
-    
-    if (savedFormEmail) {
-      setForm(prev => ({ ...prev, email: savedFormEmail }));
-    }
     
     if (savedLockUntil && savedEmail) {
       const lockTime = parseInt(savedLockUntil);
@@ -40,24 +35,32 @@ function Login() {
         startCountdown(remainingSeconds);
         setForm(prev => ({ ...prev, email: savedEmail }));
       } else {
-        // Clear expired lock
         sessionStorage.removeItem('lockUntil');
         sessionStorage.removeItem('lockedEmail');
-        sessionStorage.removeItem('formEmail');
       }
     }
   }, []);
 
-  // Save email to sessionStorage when it changes
+  // Check if user is already logged in
   useEffect(() => {
-    if (form.email) {
-      sessionStorage.setItem('formEmail', form.email);
+    const token = localStorage.getItem('token');
+    const user = JSON.parse(localStorage.getItem('user'));
+    
+    if (token && user) {
+      const role = user.role;
+      
+      if (role === "ADMIN") {
+        navigate("/admin", { replace: true });
+      } else if (role === "STUDENT") {
+        navigate("/student", { replace: true });
+      } else if (role === "STAFF") {
+        navigate("/staff", { replace: true });
+      }
     }
-  }, [form.email]);
+  }, [navigate]);
 
   const handleLogin = async (e) => {
-    e?.preventDefault(); // Prevent any default behavior
-    e?.stopPropagation(); // Stop event propagation
+    e.preventDefault();
     
     if (loading || lockTimeRemaining) return;
     
@@ -71,22 +74,24 @@ function Login() {
       // Clear any lock data on successful login
       sessionStorage.removeItem('lockUntil');
       sessionStorage.removeItem('lockedEmail');
-      sessionStorage.removeItem('formEmail');
 
+      console.log("Login successful, user role:", user.role);
+      
+      // Navigate based on role with replace to prevent back button issues
       if (user.role === "ADMIN") {
-        navigate("/admin");
+        navigate("/admin", { replace: true });
       } else if (user.role === "STUDENT") {
-        navigate("/student");
+        navigate("/student", { replace: true });
       } else if (user.role === "STAFF") {
-        navigate("/staff");
+        navigate("/staff", { replace: true });
       } else {
-        navigate("/");
+        navigate("/", { replace: true });
       }
+      
     } catch (error) {
       console.error("Login error:", error);
       const errorMsg = error.response?.data || "Invalid credentials";
       
-      // Parse error message for remaining attempts
       if (errorMsg.includes("attempt(s) remaining")) {
         const matches = errorMsg.match(/(\d+)\s+attempt/);
         if (matches) {
@@ -94,14 +99,12 @@ function Login() {
         }
         setError(errorMsg);
       } 
-      // Parse lockout message
       else if (errorMsg.includes("locked") && errorMsg.includes("minute")) {
         const matches = errorMsg.match(/(\d+)\s+minute/);
         if (matches) {
           const minutes = parseInt(matches[1]);
           const lockTimeSeconds = minutes * 60;
           
-          // Store lock expiry in sessionStorage
           const lockExpiry = Date.now() + (lockTimeSeconds * 1000);
           sessionStorage.setItem('lockUntil', lockExpiry);
           sessionStorage.setItem('lockedEmail', form.email);
@@ -129,14 +132,10 @@ function Login() {
           sessionStorage.removeItem('lockedEmail');
           return null;
         }
-        const newValue = prev - 1;
-        setLockTimeRemaining(newValue);
-        return newValue;
+        setLockTimeRemaining(prev - 1);
+        return prev - 1;
       });
     }, 1000);
-
-    // Cleanup interval on unmount
-    return () => clearInterval(interval);
   };
 
   const formatCountdown = (seconds) => {
@@ -152,15 +151,8 @@ function Login() {
       ...prev,
       [name]: value
     }));
-    // Clear error when user starts typing
     setError("");
     setRemainingAttempts(null);
-  };
-
-  const handleKeyPress = (e) => {
-    if (e.key === 'Enter' && !loading && !lockTimeRemaining) {
-      handleLogin(e);
-    }
   };
 
   return (
@@ -239,7 +231,7 @@ function Login() {
             </motion.div>
           )}
 
-          <div className="space-y-5">
+          <form onSubmit={handleLogin} className="space-y-5">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 Email Address
@@ -252,7 +244,6 @@ function Login() {
                 className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all bg-gray-50"
                 value={form.email}
                 onChange={handleInputChange}
-                onKeyPress={handleKeyPress}
                 disabled={lockTimeRemaining}
                 autoComplete="off"
               />
@@ -271,7 +262,6 @@ function Login() {
                   className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all bg-gray-50 pr-12"
                   value={form.password}
                   onChange={handleInputChange}
-                  onKeyPress={handleKeyPress}
                   disabled={lockTimeRemaining}
                   autoComplete="off"
                 />
@@ -295,16 +285,51 @@ function Login() {
               </div>
             </div>
 
+            {/* Attempts Progress Bar */}
+            {remainingAttempts !== null && !lockTimeRemaining && (
+              <div className="mt-2">
+                <div className="flex justify-between items-center mb-1">
+                  <span className="text-xs text-gray-500">Attempts remaining</span>
+                  <span className="text-xs font-medium text-yellow-600">{remainingAttempts}/3</span>
+                </div>
+                <div className="h-1.5 bg-gray-200 rounded-full overflow-hidden">
+                  <motion.div
+                    initial={{ width: "100%" }}
+                    animate={{ width: `${(remainingAttempts / 3) * 100}%` }}
+                    className="h-full bg-yellow-500"
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Lock Progress Bar */}
+            {lockTimeRemaining && (
+              <div className="mt-2">
+                <div className="flex justify-between items-center mb-1">
+                  <span className="text-xs text-gray-500">Lock time remaining</span>
+                  <span className="text-xs font-medium text-red-600">{formatCountdown(countdown)}</span>
+                </div>
+                <div className="h-1.5 bg-gray-200 rounded-full overflow-hidden">
+                  <motion.div
+                    initial={{ width: "100%" }}
+                    animate={{ width: `${(lockTimeRemaining / 60) * 100}%` }}
+                    className="h-full bg-red-500"
+                  />
+                </div>
+              </div>
+            )}
+
             <motion.button
               whileHover={!lockTimeRemaining ? { scale: 1.02 } : {}}
               whileTap={!lockTimeRemaining ? { scale: 0.98 } : {}}
-              onClick={handleLogin}
-              type="button" // Changed from "submit" to "button"
+              type="submit"
               disabled={loading || lockTimeRemaining}
               className={`w-full py-3 rounded-xl font-medium text-white transition-all ${
                 loading || lockTimeRemaining
                   ? 'bg-gray-400 cursor-not-allowed' 
-                  : 'bg-blue-600 hover:bg-blue-700 shadow-lg shadow-blue-500/30'
+                  : remainingAttempts === 1
+                    ? 'bg-orange-600 hover:bg-orange-700 shadow-lg shadow-orange-500/30'
+                    : 'bg-blue-600 hover:bg-blue-700 shadow-lg shadow-blue-500/30'
               }`}
             >
               {loading ? (
@@ -317,9 +342,11 @@ function Login() {
                 </span>
               ) : lockTimeRemaining ? (
                 `Locked for ${formatCountdown(countdown)}`
-              ) : 'Sign In'}
+              ) : (
+                'Sign In'
+              )}
             </motion.button>
-          </div>
+          </form>
 
           <div className="mt-6 text-center">
             <p className="text-gray-500 text-sm">
@@ -335,4 +362,4 @@ function Login() {
   );
 }
 
-export default Login;   
+export default Login;

@@ -22,9 +22,15 @@ export const loginUser = async (email, password) => {
     const decoded = jwtDecode(token);
     console.log("6. Decoded token:", decoded);
 
+    // Clean the role by removing ROLE_ prefix
+    let role = decoded.role;
+    if (role && role.startsWith('ROLE_')) {
+      role = role.substring(5); // Remove ROLE_ prefix
+    }
+
     const user = {
       email: decoded.sub,
-      role: decoded.role,
+      role: role, // Store clean role (ADMIN, STUDENT, STAFF)
     };
 
     localStorage.setItem("user", JSON.stringify(user));
